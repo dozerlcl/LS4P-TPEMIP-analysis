@@ -1,0 +1,181 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 16,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# %matplotlib inline\n",
+    "import numpy as np\n",
+    "import matplotlib.pyplot as plt\n",
+    "import xarray as xr\n",
+    "import pandas as pd"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "进行LS4P分析的前处理部分\n",
+    "\n",
+    "将累计降水处理为每个时次（之后到下个时次）之间的降水\n",
+    "+ WRF_SYS\n",
+    "+ YSU"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "+ WRF_SYS是逐六小时的累计降水（先合并RAINC和RAINNC两个变量），做差，再进行日平均"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 17,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import glob\n",
+    "from os.path import basename\n",
+    "dir_in = \"/raid52/yycheng/LS4P-TPEMIP/merge/WRF_SYS/precip_origin/precip_accumulated_6hr/\"\n",
+    "dir_out = \"/raid52/yycheng/LS4P-TPEMIP/merge/WRF_SYS/precip_origin/precip_singlestep_6hr/\"\n",
+    "\n",
+    "for filepath in glob.iglob('/raid52/yycheng/LS4P-TPEMIP/merge/WRF_SYS/precip_origin/merge/precip_accumulated_6hr/precip_wrfout*.nc'):\n",
+    "    # data from 1991 to 2015\n",
+    "    # ds_wrf_sys= xr.open_mfdataset(dir_in + \"precip_wrfout*.nc\")\n",
+    "    # ds_wrf_sys= xr.open_dataset(dir_in + \"precip_wrfout-1991.nc\")\n",
+    "    ds_wrf_sys= xr.open_dataset(filepath)\n",
+    "    mod_pre = {}\n",
+    "    testb = ds_wrf_sys['RAINC'][1:,:,:].assign_coords({\"XTIME\":ds_wrf_sys['RAINC'][0:-1,:,:].XTIME})\n",
+    "    testa = ds_wrf_sys['RAINC'][0:-1,:,:]\n",
+    "    mod_pre['RAINC'] = testb - testa\n",
+    "    testb = ds_wrf_sys['RAINNC'][1:,:,:].assign_coords({\"XTIME\":ds_wrf_sys['RAINNC'][0:-1,:,:].XTIME})\n",
+    "    testa = ds_wrf_sys['RAINNC'][0:-1,:,:]\n",
+    "    mod_pre['RAINNC'] = testb - testa\n",
+    "    mod_pre['pre'] = mod_pre['RAINC'] + mod_pre['RAINNC']\n",
+    "    # count daily mean precip\n",
+    "    # 原本的时间坐标 XTIME daily_xtime 和XTIME一样大，但是进行了daily的group\n",
+    "    daily_xtime = mod_pre['pre'].XTIME.dt.strftime(\"%Y-%m-%d\")\n",
+    "    mod_pre['dailypre'] = mod_pre['pre'].groupby(daily_xtime).mean(\"XTIME\")\n",
+    "    # change dataarry name\n",
+    "    mod_pre['dailypre'].name='dailypre'\n",
+    "    # 从原来group使用的srftime修改为正确的cf格式的时间 到daily_xtime_pd 并创建稳数组XTIME，以便后续作为坐标变量\n",
+    "    daily_xtime_pd = pd.to_datetime(mod_pre['dailypre'].strftime.values)\n",
+    "    XTIME_daily    = xr.DataArray(daily_xtime_pd, name='time',dims='time')\n",
+    "    # 修改坐标变量\n",
+    "    mod_pre['dailypre'] = mod_pre['dailypre'].rename({\"strftime\":\"time\"}).assign_coords( {\"time\":XTIME_daily} )\n",
+    "    mod_pre['dailypre'].time\n",
+    "    # 输出到NC文件\n",
+    "    mod_pre['dailypre'].to_netcdf(dir_out + basename(filepath),'w')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "+ YSU是逐日的total降水，但是XLON XLAT XTIME 坐标丢失，需要补充\n",
+    "\n",
+    "+ 还在施工"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 23,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "dir_in = \"/raid52/yycheng/LS4P-TPEMIP/merge/WRF_SYS/precip_origin/precip_accumulated_6hr/\"\n",
+    "# data from 1991 to 2015\n",
+    "ds_wrf_sys= xr.open_dataset(dir_in + \"precip_wrfout-1991.nc\")\n",
+    "ds_wrf_sys.coords\n",
+    "dir_in = \"/raid52/yycheng/LS4P-TPEMIP/merge/YSU/precip_origin/merge/\"\n",
+    "ds_ysu = xr.open_dataset(dir_in + \"precip_1991.nc\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 75,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "(153, 299, 399)"
+      ]
+     },
+     "execution_count": 75,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "ds_wrf_sys.coords\n",
+    "# ds_wrf_sys['RAINC'].values.shape\n",
+    "ds_ysu['pr'].shape#.coords"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 73,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "Frozen(SortedKeysDict({'y': 239, 'x': 359, 'XTIME': 641}))"
+      ]
+     },
+     "execution_count": 73,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "ds_wrf_sys.dims\n",
+    "# ds_wrf_sys.coords"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 67,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "(153, 299, 399)"
+      ]
+     },
+     "execution_count": 67,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "XTIME = ds_wrf_sys.XTIME[28:-1:4] # select daily time\n",
+    "XLONG = ds_wrf_sys.XLONG\n",
+    "XLAT  = ds_wrf_sys.XLAT\n",
+    "ds_ysu['pr'].values.shape\n",
+    "# xr.DataArray(ds_ysu['pr'].values, dims=['XTIME','y','x'],coords={\"XTIME\":XTIME,\"XLAT\":XLAT,\"XLONG\":XLONG},name=\"dailypre\")"
+   ]
+  }
+ ],
+ "metadata": {
+  "interpreter": {
+   "hash": "cf76c667a4237489b4b1ec2fcd3b74093597186816c0203f0439927789bdc800"
+  },
+  "kernelspec": {
+   "display_name": "Python 3.9.5 64-bit ('pync0326': conda)",
+   "name": "python3"
+  },
+  "language_info": {
+   "name": "python",
+   "version": ""
+  },
+  "orig_nbformat": 4
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}
